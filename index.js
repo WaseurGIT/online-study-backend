@@ -4,6 +4,7 @@ const cors = require("cors");
 require("dotenv").config();
 const port = process.env.PORT || 5000;
 const app = express();
+const jwt = require("jsonwebtoken");
 
 // Express & middleware
 app.use(cors());
@@ -34,6 +35,29 @@ async function run() {
       .db("onlineStudyDB")
       .collection("submissions");
 
+    app.post("/jwt", async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "1h",
+      });
+      res.send({ token });
+    });
+
+    const verifyToken = (req, res, next) => {
+      if (!req.headers.authorization) {
+        return res.status(401).send({ message: "Unauthorized" });
+      }
+
+      const token = req.headers.authorization.split(" ")[1];
+      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+        if (err) {
+          return res.status(401).send({ message: "Unauthorized" });
+        }
+        req.user = decoded;
+        next();
+      });
+    };
+
     //   ************ assignment related APIs **************
 
     // 2. get all assignments from the database
@@ -44,18 +68,50 @@ async function run() {
     });
 
     // 1. get the assignment from the client side
-    app.post("/assignments", async (req, res) => {
+    app.post("/assignments", verifyToken, async (req, res) => {
       const newAssignment = req.body;
       const result = await assignmentsCollection.insertOne(newAssignment);
       res.send(result);
     });
 
     // 3. delete an assignment
-    app.delete("/assignments/:id", async (req, res) => {
+    app.delete("/assignments/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const cursor = await assignmentsCollection.deleteOne(query);
-      res.send(cursor);
+      const email = req.user.email;
+
+      const assignment = await assignmentsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+
+      if (assignment.creatorEmail !== email) {
+        return res.status(403).send({ message: "Forbidden" });
+      }
+
+      const result = await assignmentsCollection.deleteOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+    // 4. get a single assignment by id
+    app.get("/assignments/:id", async (req, res) => {
+      const id = req.params.id;
+      const result = await assignmentsCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      res.send(result);
+    });
+
+    // 5. update an assignment
+    app.patch("/assignments/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const updatedAssignment = req.body;
+
+      const result = await assignmentsCollection.updateOne(
+        { _id: new ObjectId(id) },
+        { $set: updatedAssignment }
+      );
+      res.send(result);
     });
 
     // ********* submission related APIs **************
