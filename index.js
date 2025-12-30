@@ -35,6 +35,7 @@ async function run() {
       .db("onlineStudyDB")
       .collection("submissions");
 
+    //   ************ JWT related API **************
     app.post("/jwt", async (req, res) => {
       const user = req.body;
       const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
@@ -79,17 +80,16 @@ async function run() {
       const id = req.params.id;
       const email = req.user.email;
 
-      const assignment = await assignmentsCollection.findOne({
-        _id: new ObjectId(id),
-      });
-
-      if (assignment.creatorEmail !== email) {
-        return res.status(403).send({ message: "Forbidden" });
-      }
-
       const result = await assignmentsCollection.deleteOne({
         _id: new ObjectId(id),
+        creatorEmail: email,
       });
+
+      if (result.deletedCount === 0) {
+        return res
+          .status(403)
+          .send({ message: "Forbidden or assignment not found" });
+      }
       res.send(result);
     });
 
