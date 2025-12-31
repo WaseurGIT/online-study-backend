@@ -34,6 +34,7 @@ async function run() {
     const submissionsCollection = client
       .db("onlineStudyDB")
       .collection("submissions");
+    const usersCollection = client.db("onlineStudyDB").collection("users");
 
     //   ************ JWT related API **************
     app.post("/jwt", async (req, res) => {
@@ -115,6 +116,46 @@ async function run() {
     });
 
     // ********* submission related APIs **************
+
+    // ********* users related APIs **************
+
+    // 2. post a user to the database
+    app.post("/users", async (req, res) => {
+      const { email, uid } = req.body;
+      if (!email || !uid) {
+        return res.status(400).send({ message: "Invalid user data" });
+      }
+      const existingUser = await usersCollection.findOne({
+        $or: [{ email }, { uid }],
+      });
+      if (existingUser) {
+        return res.send({ message: "User already exists" });
+      }
+      const user = {
+        ...req.body,
+        role: "user",
+        createdAt: new Date(),
+      };
+      const result = await usersCollection.insertOne(user);
+      res.send(result);
+    });
+
+    //1. get all users
+    app.get("/users", verifyToken, async (req, res) => {
+      const cursor = usersCollection.find();
+      const result = await cursor.toArray();
+      res.send(result);
+    });
+
+    // 3. get single user
+    app.get("/users/:email", verifyToken, async (req, res) => {
+      if (req.user.email !== req.params.email) {
+        return res.status(403).send({ message: "Forbidden" });
+      }
+
+      const user = await usersCollection.findOne({ email: req.params.email });
+      res.send(user);
+    });
 
     // Send a ping to confirm a successful connection
     await client.db("admin").command({ ping: 1 });
