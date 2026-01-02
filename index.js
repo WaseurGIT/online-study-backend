@@ -46,11 +46,14 @@ async function run() {
     });
 
     const verifyToken = (req, res, next) => {
-      if (!req.headers.authorization) {
+      const authHeader = req.headers.authorization;
+
+      if (!authHeader) {
         return res.status(401).send({ message: "Unauthorized" });
       }
 
-      const token = req.headers.authorization.split(" ")[1];
+      const token = authHeader.split(" ")[1];
+
       jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
         if (err) {
           return res.status(401).send({ message: "Unauthorized" });
@@ -71,7 +74,12 @@ async function run() {
 
     // 1. get the assignment from the client side
     app.post("/assignments", verifyToken, async (req, res) => {
-      const newAssignment = req.body;
+      const newAssignment = {
+        ...req.body,
+        creatorEmail: req.user.email,
+        createdAt: new Date(),
+      };
+
       const result = await assignmentsCollection.insertOne(newAssignment);
       res.send(result);
     });
@@ -116,6 +124,129 @@ async function run() {
     });
 
     // ********* submission related APIs **************
+
+    // 1. get from db
+    app.get("/submissions", verifyToken, async (req, res) => {
+      const email = req.query.email;
+
+      if (email && email !== req.user.email) {
+        return res.status(403).send({ message: "Forbidden Access" });
+      }
+      const query = email ? { examineeEmail: email } : {};
+      const result = await submissionsCollection.find(query).toArray();
+      res.send(result);
+    });
+    // 2. post from client
+    app.post("/submissions", verifyToken, async (req, res) => {
+      try {
+        const {
+          assignmentId,
+          assignmentTitle,
+          assignmentMarks,
+          examineeEmail,
+          examineeName,
+          googleDocsLink,
+          note,
+        } = req.body;
+        if (
+          !assignmentId ||
+          !examineeEmail ||
+          !examineeName ||
+          !googleDocsLink
+        ) {
+          return res.status(400).send({ message: "Missing required fields" });
+        }
+
+        if (examineeEmail !== req.user.email) {
+          return res.status(403).send({ message: "Forbidden email mismatch" });
+        }
+        const alreadySubmitted = await submissionsCollection.findOne({
+          assignmentId,
+          examineeEmail,
+        });
+
+        if (alreadySubmitted) {
+          return res
+            .status(409)
+            .send({ message: "You have already submitted this assignment" });
+        }
+
+        const submission = {
+          assignmentId,
+          assignmentTitle: assignmentTitle || "",
+          assignmentMarks: assignmentMarks || null,
+          examineeEmail,
+          examineeName,
+          googleDocsLink,
+          note: note || "",
+
+          status: "pending",
+          obtainedMarks: null,
+          feedback: null,
+          examinerEmail: null,
+
+          submittedAt: new Date(),
+          markedAt: null,
+        };
+
+        const result = await submissionsCollection.insertOne(submission);
+
+        res.status(200).send({
+          message: "Submission Successful",
+          insertedId: result.insertedId,
+        });
+      } catch (err) {
+        console.error("Submission error:", error);
+        res.status(500).send({
+          message: "Failed to submit assignment",
+        });
+      }
+    });
+    // 3. delete one submission
+    app.delete("/submission/:id", verifyToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const userEmail = req.user.email;
+
+        const submission = await submissionsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!submission) {
+          return res.status(404).send({ message: "Submission not found" });
+        }
+
+        if (submission.examineeEmail !== userEmail) {
+          return res.status(403).send({
+            message: "Forbidden: You can delete only your own submission",
+          });
+        }
+
+        if (submission.status !== "pending") {
+          return res
+            .status(400)
+            .send({ message: "Cannot delete a marked submission" });
+        }
+
+        const result = await submissionsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        if (result.deletedCount === 1) {
+          return res.send({
+            message: "Submission deleted successfully",
+          });
+        }
+        res.status(500).send({
+          message: "Failed to delete submission",
+        });
+      } catch (error) {
+        console.error("Delete submission error:", error);
+        res.status(500).send({
+          message: "Server error",
+        });
+      }
+    });
 
     // ********* users related APIs **************
 
